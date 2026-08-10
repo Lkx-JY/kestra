@@ -12,6 +12,8 @@ import com.google.common.annotations.VisibleForTesting;
 import io.kestra.core.assets.AssetManagerFactory;
 import io.kestra.core.contexts.configuration.KestraConfiguration;
 import io.kestra.core.encryption.EncryptionConfig;
+import io.kestra.core.exceptions.InternalException;
+import io.kestra.core.exceptions.KestraRuntimeException;
 import io.kestra.core.metrics.MetricRegistry;
 import io.kestra.core.models.executions.Execution;
 import io.kestra.core.models.executions.TaskRun;
@@ -22,6 +24,7 @@ import io.kestra.core.models.property.PropertyContext;
 import io.kestra.core.models.tasks.Task;
 import io.kestra.core.models.triggers.AbstractTrigger;
 import io.kestra.core.plugins.PluginConfigurations;
+import io.kestra.core.services.ExecutionOutputService;
 import io.kestra.core.services.KVStoreService;
 import io.kestra.core.services.NamespaceService;
 import io.kestra.core.services.TaskOutputService;
@@ -88,6 +91,9 @@ public class RunContextFactory {
     private TaskOutputService taskOutputService;
 
     @Inject
+    private ExecutionOutputService executionOutputService;
+
+    @Inject
     private Provider<RunContextInitializer> runContextInitializerProvider;
 
     @Inject
@@ -120,6 +126,7 @@ public class RunContextFactory {
                 .withFlow(flow)
                 .withExecution(execution)
                 .withOutputs(taskOutputService.computeOutputs(execution))
+                .withExecutionOutputs(executionOutputs(execution))
                 .withDecryptVariables(decryptVariables)
                 .withSecretInputs(secretInputsFromFlow(flow))
         );
@@ -154,6 +161,7 @@ public class RunContextFactory {
             .withTask(task)
             .withExecution(execution)
             .withOutputs(taskOutputService.computeOutputs(execution))
+            .withExecutionOutputs(executionOutputs(execution))
             .withTaskRun(taskRun)
             .withDecryptVariables(decryptVariables)
             .withSecretInputs(secretInputsFromFlow(flow));
@@ -253,6 +261,20 @@ public class RunContextFactory {
     @VisibleForTesting
     public RunContext of() {
         return of(Map.of());
+    }
+
+    /**
+     * Loads the flow-level outputs of an execution. For a loop sub-execution, the outputs of the parent execution are
+     * used as the parent is the execution exposed inside the run variables.
+     */
+    private Map<String, Object> executionOutputs(Execution execution) {
+        Execution realExecution = execution != null && execution.getLoopRun() != null ? execution.getLoopRun().parent() : execution;
+
+        try {
+            return executionOutputService.getOutputs(realExecution);
+        } catch (InternalException e) {
+            throw new KestraRuntimeException(e);
+        }
     }
 
     private List<String> secretInputsFromFlow(FlowInterface flow) {

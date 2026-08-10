@@ -97,6 +97,9 @@ public class ExecutionService {
     private TaskOutputService taskOutputService;
 
     @Inject
+    private ExecutionOutputService executionOutputService;
+
+    @Inject
     private DispatchQueueInterface<ExecutionCommand> executionCommandQueue;
 
     @Inject
@@ -706,6 +709,7 @@ public class ExecutionService {
                 if (purgeExecution) {
                     builder.executionsCount(this.executionRepository.purge(executions));
                     builder.taskOutputsCount(this.taskOutputService.purge(executions));
+                    builder.executionOutputsCount(this.executionOutputService.purge(executions));
                 }
 
                 if (purgeLog) {
@@ -1165,6 +1169,9 @@ public class ExecutionService {
 
         @Builder.Default
         private int taskOutputsCount = 0;
+
+        @Builder.Default
+        private int executionOutputsCount = 0;
 
         @Builder.Default
         private int logsCount = 0;

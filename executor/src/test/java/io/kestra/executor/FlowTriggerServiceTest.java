@@ -12,6 +12,7 @@ import io.kestra.core.models.executions.ExecutionKind;
 import io.kestra.core.models.flows.Flow;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.services.ConditionService;
+import io.kestra.core.services.ExecutionOutputService;
 import io.kestra.core.services.FlowService;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.core.log.Log;
@@ -33,11 +34,13 @@ class FlowTriggerServiceTest {
     private ConditionService conditionService;
     @Inject
     private FlowService flowService;
+    @Inject
+    private ExecutionOutputService executionOutputService;
     private FlowTriggerService flowTriggerService;
 
     @BeforeEach
     void setUp() {
-        flowTriggerService = new FlowTriggerService(conditionService, runContextFactory, flowService);
+        flowTriggerService = new FlowTriggerService(conditionService, runContextFactory, flowService, executionOutputService);
     }
 
     @Test

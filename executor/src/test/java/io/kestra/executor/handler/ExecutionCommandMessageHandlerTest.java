@@ -24,6 +24,7 @@ import io.kestra.core.models.flows.FlowInterface;
 import io.kestra.core.models.flows.FlowWithSource;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.runners.FlowMetaStoreInterface;
+import io.kestra.core.services.ExecutionOutputService;
 import io.kestra.core.services.ExecutionService;
 import io.kestra.core.services.TaskOutputService;
 import io.kestra.executor.ExecutionStateStore;
@@ -58,6 +59,8 @@ class ExecutionCommandMessageHandlerTest {
     @Mock
     TaskOutputService taskOutputService;
     @Mock
+    ExecutionOutputService executionOutputService;
+    @Mock
     KillSwitchService killSwitchService;
     @Mock
     KillSwitchActionService killSwitchActionService;
@@ -74,6 +77,7 @@ class ExecutionCommandMessageHandlerTest {
             executionStateStore,
             flowMetaStore,
             taskOutputService,
+            executionOutputService,
             asyncOperationService,
             executionEventMessageHandler,
             killSwitchService,

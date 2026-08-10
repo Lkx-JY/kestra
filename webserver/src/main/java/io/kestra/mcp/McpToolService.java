@@ -9,6 +9,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 
 import io.kestra.core.events.CrudEvent;
+import io.kestra.core.exceptions.InternalException;
 import io.kestra.core.executor.command.Create;
 import io.kestra.core.executor.command.ExecutionCommand;
 import io.kestra.core.mcp.models.McpServer;
@@ -23,6 +24,7 @@ import io.kestra.core.queues.DispatchQueueInterface;
 import io.kestra.core.queues.QueueException;
 import io.kestra.core.repositories.FlowRepositoryInterface;
 import io.kestra.core.runners.FlowInputOutput;
+import io.kestra.core.services.ExecutionOutputService;
 import io.kestra.core.services.ExecutionStreamingService;
 import io.kestra.plugin.core.trigger.McpToolTrigger;
 
@@ -47,6 +49,7 @@ public class McpToolService {
     private final ApplicationEventPublisher<CrudEvent<Execution>> eventPublisher;
     private final McpConfig mcpConfig;
     private final FlowInputOutput flowInputOutput;
+    private final ExecutionOutputService executionOutputService;
     private final Cache<ToolHandlerCacheKey, McpServerFeatures.AsyncToolSpecification> asyncToolSpecificationCache;
 
     private static final McpSchema.CallToolResult FLOW_ERROR_CALL_TOOL_RESULT = McpSchema.CallToolResult.builder()
@@ -60,7 +63,8 @@ public class McpToolService {
         FlowToolSchemaMapper flowToolSchemaMapper,
         ExecutionStreamingService streamingService, ApplicationEventPublisher<CrudEvent<Execution>> eventPublisher,
         McpConfig mcpConfig,
-        FlowInputOutput flowInputOutput) {
+        FlowInputOutput flowInputOutput,
+        ExecutionOutputService executionOutputService) {
         this.executionCommandQueue = executionCommandQueue;
         this.flowRepositoryInterface = flowRepositoryInterface;
         this.flowToolSchemaMapper = flowToolSchemaMapper;
@@ -68,6 +72,7 @@ public class McpToolService {
         this.eventPublisher = eventPublisher;
         this.mcpConfig = mcpConfig;
         this.flowInputOutput = flowInputOutput;
+        this.executionOutputService = executionOutputService;
         asyncToolSpecificationCache = Caffeine.newBuilder()
             .maximumSize(mcpConfig.toolCacheConfig().maximumSize())
             .expireAfterAccess(mcpConfig.toolCacheConfig().expireAfterAccess())
@@ -142,12 +147,19 @@ public class McpToolService {
             }
 
             return runFlowForMcpTask(flow, execution)
-                .map(
-                    executionResult -> McpSchema.CallToolResult.builder()
-                        .structuredContent(executionResult.getOutputs() != null && executionResult.getState().isSuccess() ? executionResult.getOutputs() : Map.of())
-                        .isError(!executionResult.getState().isSuccess())
-                        .build()
-                )
+                .flatMap(executionResult ->
+                {
+                    try {
+                        return Mono.just(
+                            McpSchema.CallToolResult.builder()
+                                .structuredContent(executionResult.getState().isSuccess() ? executionOutputService.getOutputs(executionResult) : Map.of())
+                                .isError(!executionResult.getState().isSuccess())
+                                .build()
+                        );
+                    } catch (InternalException e) {
+                        return Mono.error(e);
+                    }
+                })
                 .onErrorReturn(Exception.class, FLOW_ERROR_CALL_TOOL_RESULT);
         };
     }
