@@ -173,7 +173,9 @@ public final class ExecutableUtils {
                 String subflowId = runContext.render(currentTask.subflowId().flowId());
                 Optional<Integer> subflowRevision = currentTask.subflowId().revision();
 
-                FlowInterface flow = flowMetaStore.findByIdFromTask(
+                // the child execution snapshots the labels and variables of the subflow, so it must be built
+                // from the subflow as the executor will run it, not as it was authored
+                FlowInterface flow = flowMetaStore.findByIdFromTaskThenInjectDefaults(
                     currentExecution.getTenantId(),
                     subflowNamespace,
                     subflowId,

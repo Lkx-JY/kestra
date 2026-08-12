@@ -10,9 +10,8 @@ import java.util.Optional;
 
 import io.kestra.core.models.Label;
 import io.kestra.core.models.executions.Execution;
-import io.kestra.core.models.flows.Flow;
-import io.kestra.core.models.flows.FlowInterface;
 import io.kestra.core.models.flows.FlowWithException;
+import io.kestra.core.models.flows.FlowWithSource;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.runners.FlowInputOutput;
 import io.kestra.core.runners.FlowMetaStoreInterface;
@@ -149,8 +148,11 @@ public class SubflowFunction implements KestraFunction {
             // ACL is scoped to the caller flow (callerNamespace/callerId), matching the Subflow task trust model:
             // if the caller flow may reference the target, so may subflow(). Note this is reachable at execute-form
             // render time, not only at execution time, so anyone able to open the form triggers this resolution.
-            FlowInterface targetFlow = flowMetaStore.get()
-                .findByIdFromTask(tenantId, namespace, id, revision, tenantId, callerNamespace, callerId)
+            // the child execution snapshots the labels and variables of the target, so it must be resolved as the
+            // executor will run it — that is also what surfaces a governance rejection as a FlowWithException here
+            // instead of letting it become a created-then-failed execution.
+            FlowWithSource targetFlow = flowMetaStore.get()
+                .findByIdFromTaskThenInjectDefaults(tenantId, namespace, id, revision, tenantId, callerNamespace, callerId)
                 .orElseThrow(
                     () -> new PebbleException(
                         null, "Unable to find flow '" + namespace + "'.'" + id + "'"
@@ -180,7 +182,7 @@ public class SubflowFunction implements KestraFunction {
 
             Execution terminated;
             try {
-                terminated = executionService.get().runAndWait(execution, (Flow) targetFlow, timeout);
+                terminated = executionService.get().runAndWait(execution, targetFlow, timeout);
             } catch (Exception e) {
                 throw new PebbleException(e, "Failed to run subflow '" + namespace + "'.'" + id + "': " + e.getMessage(), lineNumber, self.getName());
             }
