@@ -12,7 +12,7 @@ import io.kestra.core.killswitch.KillSwitchService;
 import io.kestra.core.models.Label;
 import io.kestra.core.models.executions.Execution;
 import io.kestra.core.models.executions.TaskRun;
-import io.kestra.core.models.flows.Flow;
+import io.kestra.core.models.flows.FlowWithSource;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.runners.ExecutionEvent;
 import io.kestra.core.runners.ExecutionEventType;
@@ -130,8 +130,10 @@ public class ExecutionCommandMessageHandler implements ExecutorMessageHandler<Ex
         AsyncOperationProcessedEvent.Outcome outcome = AsyncOperationProcessedEvent.Outcome.SUCCEEDED;
         String error = null;
         try {
+            // the flow must be the one the executor will run, not the one as authored: the new execution
+            // snapshots its labels and variables, which plugin defaults and governance can still change
             var flow = flowMetaStore
-                .findById(command.tenantId(), command.namespace(), command.flowId(), Optional.ofNullable(command.flowRevision()))
+                .findByIdThenInjectDefaults(command.tenantId(), command.namespace(), command.flowId(), Optional.ofNullable(command.flowRevision()))
                 .orElseThrow(() -> new FlowNotFoundException(command.executionFullId(), command.flowRevision()));
 
             var newExecution = executionService.create(command, flow);
@@ -175,12 +177,10 @@ public class ExecutionCommandMessageHandler implements ExecutorMessageHandler<Ex
             // Apply inputs override if the controller merged new inputs before emitting the command
             final var sourceExecution = command.inputs() != null ? raw.withInputs(command.inputs()) : raw;
 
-            // findByExecutionThenInjectDefaults returns FlowWithSource (a Flow subtype);
-            // findById returns FlowInterface — cast is safe since all concrete implementations return Flow.
-            Flow flow;
+            FlowWithSource flow;
             if (command.revision() != null) {
-                flow = (Flow) flowMetaStore
-                    .findById(command.tenantId(), command.namespace(), command.flowId(), Optional.of(command.revision()))
+                flow = flowMetaStore
+                    .findByIdThenInjectDefaults(command.tenantId(), command.namespace(), command.flowId(), Optional.of(command.revision()))
                     .orElseThrow(() -> new FlowNotFoundException(sourceExecution));
             } else {
                 flow = flowMetaStore
