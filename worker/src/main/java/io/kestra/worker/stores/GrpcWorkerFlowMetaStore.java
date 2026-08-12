@@ -128,4 +128,15 @@ public class GrpcWorkerFlowMetaStore implements FlowMetaStoreInterface, WorkerMe
     public Optional<FlowWithSource> findByExecutionThenInjectDefaults(Execution execution) {
         throw new UnsupportedOperationException("findByExecutionThenInjectDefaults is not supported on workers");
     }
+
+    @Override
+    public Optional<FlowWithSource> findByIdThenInjectDefaults(String tenantId, String namespace, String id, Optional<Integer> revision) {
+        throw new UnsupportedOperationException("findByIdThenInjectDefaults is not supported on workers");
+    }
+
+    @Override
+    public Optional<FlowWithSource> findByIdFromTaskThenInjectDefaults(String tenantId, String namespace, String id, Optional<Integer> revision, String fromTenant,
+        String fromNamespace, String fromId) {
+        throw new UnsupportedOperationException("findByIdFromTaskThenInjectDefaults is not supported on workers");
+    }
 }

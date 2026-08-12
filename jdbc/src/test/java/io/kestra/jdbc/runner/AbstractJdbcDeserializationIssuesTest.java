@@ -110,6 +110,17 @@ public abstract class AbstractJdbcDeserializationIssuesTest {
             public Optional<FlowWithSource> findByExecutionThenInjectDefaults(Execution execution) {
                 return Optional.empty();
             }
+
+            @Override
+            public Optional<FlowWithSource> findByIdThenInjectDefaults(String tenantId, String namespace, String id, Optional<Integer> revision) {
+                return Optional.empty();
+            }
+
+            @Override
+            public Optional<FlowWithSource> findByIdFromTaskThenInjectDefaults(String tenantId, String namespace, String id, Optional<Integer> revision, String fromTenant,
+                String fromNamespace, String fromId) {
+                return Optional.empty();
+            }
         };
     }
 }
