@@ -15,6 +15,7 @@ import io.kestra.core.models.triggers.AbstractTrigger;
 import io.kestra.core.models.triggers.multipleflows.MultipleCondition;
 import io.kestra.core.models.triggers.multipleflows.MultipleConditionStateStore;
 import io.kestra.core.models.triggers.multipleflows.MultipleConditionWindow;
+import io.kestra.core.runners.FlowMetaStoreInterface;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.runners.TransactionContext;
@@ -34,11 +35,13 @@ public class FlowTriggerService {
     private final ConditionService conditionService;
     private final RunContextFactory runContextFactory;
     private final FlowService flowService;
+    private final FlowMetaStoreInterface flowMetaStore;
 
-    public FlowTriggerService(ConditionService conditionService, RunContextFactory runContextFactory, FlowService flowService) {
+    public FlowTriggerService(ConditionService conditionService, RunContextFactory runContextFactory, FlowService flowService, FlowMetaStoreInterface flowMetaStore) {
         this.conditionService = conditionService;
         this.runContextFactory = runContextFactory;
         this.flowService = flowService;
+        this.flowMetaStore = flowMetaStore;
     }
 
     public Stream<FlowWithFlowTrigger> withFlowTriggersOnly(Stream<FlowWithSource> allFlows) {
@@ -63,6 +66,11 @@ public class FlowTriggerService {
      * This method computes executions to trigger from flow triggers from a given execution.
      * It only computes those depending on standard (non-dependsOn) conditions, so it must be used
      * in conjunction with {@link #computeExecutionsFromFlowTriggerDependsOn(Execution, Flow, MultipleConditionStateStore)}.
+     * <p>
+     * Triggers are matched on the flow as authored and the execution is built from the flow resolved for
+     * runtime, so a trigger that exists only because governance adds one does not fire, while a flow
+     * governance blocks still does — its execution is created and the executor fails it fast, rather than
+     * the trigger going silent.
      */
     public List<Execution> computeExecutionsFromFlowTriggerConditions(Execution execution, Flow flow) {
         List<FlowWithFlowTrigger> flowWithFlowTriggers = computeFlowTriggers(execution, flow)
@@ -76,13 +84,15 @@ public class FlowTriggerService {
             return Collections.emptyList();
         }
 
+        Flow resolved = resolveForRuntime(flow);
+
         // compute all executions to create from flow triggers without taken into account multiple conditions
         return flowWithFlowTriggers.stream()
             .map(
                 f -> f.getTrigger().evaluate(
                     Optional.empty(),
-                    runContextFactory.of(f.getFlow(), execution),
-                    f.getFlow(),
+                    runContextFactory.of(resolved, execution),
+                    resolved,
                     execution
                 )
             )
@@ -95,6 +105,9 @@ public class FlowTriggerService {
      * This method computes executions to trigger from flow triggers from a given execution.
      * It only computes those depending on dependsOn, so it must be used
      * in conjunction with {@link #computeExecutionsFromFlowTriggerConditions(Execution, Flow)}.
+     * <p>
+     * Triggers are matched on the flow as authored and the execution is built from the flow resolved for
+     * runtime, as on the standard-conditions route.
      */
     public List<Execution> computeExecutionsFromFlowTriggerDependsOn(Execution execution, Flow flow, MultipleConditionStateStore multipleConditionStorage) {
         List<FlowWithFlowTrigger> flowWithFlowTriggers = computeFlowTriggers(execution, flow)
@@ -107,6 +120,11 @@ public class FlowTriggerService {
         if (flowWithFlowTriggers.isEmpty()) {
             return Collections.emptyList();
         }
+
+        // resolved before entering the window transaction: the store runs the consumer inside a transaction
+        // holding a pooled connection, and resolving there can need a second one — a repository read when the
+        // head revision moved, or a governance lookup on a cache miss — deadlocking the pool under load
+        Flow resolved = resolveForRuntime(flow);
 
         List<Execution> executions = flowWithFlowTriggers.stream()
             .flatMap(
@@ -124,7 +142,7 @@ public class FlowTriggerService {
                     flowWithMultipleCondition.getFlow(),
                     flowWithMultipleCondition.getMultipleCondition(),
                     buildOutputs(execution),
-                    (txContext, multipleConditionWindow) -> processMultipleConditionWindow(txContext, flowWithMultipleCondition, multipleConditionWindow, execution, multipleConditionStorage)
+                    (txContext, multipleConditionWindow) -> processMultipleConditionWindow(txContext, flowWithMultipleCondition, multipleConditionWindow, execution, multipleConditionStorage, resolved)
                 )
             )
             .filter(Objects::nonNull)
@@ -137,7 +155,7 @@ public class FlowTriggerService {
     }
 
     private Execution processMultipleConditionWindow(TransactionContext txContext, FlowWithFlowTriggerAndMultipleCondition flowWithMultipleCondition,
-        MultipleConditionWindow multipleConditionWindow, Execution execution, MultipleConditionStateStore multipleConditionStateStore) {
+        MultipleConditionWindow multipleConditionWindow, Execution execution, MultipleConditionStateStore multipleConditionStateStore, Flow resolved) {
         if (!multipleConditionWindow.isValid(ZonedDateTime.now())) {
             return null;
         }
@@ -170,8 +188,8 @@ public class FlowTriggerService {
         ) {
             Optional<Execution> maybeExecution = flowWithMultipleCondition.getTrigger().evaluate(
                 Optional.of(updatedWindow),
-                runContext,
-                flowWithMultipleCondition.getFlow(),
+                runContextFactory.of(resolved, execution),
+                resolved,
                 execution
             );
 
@@ -179,6 +197,31 @@ public class FlowTriggerService {
         }
 
         return null;
+    }
+
+    /**
+     * Resolves the flow a trigger is about to fire for as the executor will run it, falling back to the
+     * authored definition when it can no longer be resolved.
+     * <p>
+     * The created execution snapshots the flow labels and variables, so both flow-trigger routes must build it
+     * from the resolved flow — the {@code dependsOn} one included, whose {@link io.kestra.core.executor.command.Create}
+     * command otherwise carries the authored labels and, those winning on merge, pins back a value governance
+     * meant to override.
+     */
+    private Flow resolveForRuntime(Flow flow) {
+        Optional<FlowWithSource> resolved = flowMetaStore
+            .findByIdThenInjectDefaults(flow.getTenantId(), flow.getNamespace(), flow.getId(), Optional.ofNullable(flow.getRevision()));
+
+        if (resolved.isEmpty()) {
+            log.warn(
+                "Flow {} matched a flow trigger but can no longer be found, most likely deleted meanwhile. "
+                    + "The execution it creates will fail because the flow is missing.",
+                flow.uid()
+            );
+            return flow;
+        }
+
+        return resolved.get();
     }
 
     private Map<String, Object> buildOutputs(Execution execution) {
